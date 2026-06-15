@@ -1,7 +1,7 @@
 const CONFIG = {
   // jsDelivr CDN URL pointing to your model in the GitHub repo
   // Format: https://cdn.jsdelivr.net/gh/username/repo@branch/path/to/file.onnx
-  modelUrl: 'https://cdn.jsdelivr.net/gh/Srestho0101/monster-vision@main/models/tmv-un_quantized_dynamic.onnx',
+  modelUrl: 'https://cdn.jsdelivr.net/gh/Srestho0101/monster-vision@main/models/tmv-quantized_dynamic.onnx',
 
   // Class names (in the same order as your model was trained)
   classNames: ['Spiderman figure'],
