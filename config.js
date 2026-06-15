@@ -1,14 +1,7 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// DRONE VISION CONFIG
-// ─────────────────────────────────────────────────────────────────────────────
-// Edit this file when you change models, add classes, or adjust defaults.
-// No need to touch the HTML file.
-// ─────────────────────────────────────────────────────────────────────────────
-
 const CONFIG = {
-  // GitHub release URL to your .onnx model
-  // Example: 'https://github.com/yourname/yolo-drone/releases/download/v1.0/model.onnx'
-  modelUrl: 'https://github.com/Srestho0101/monster-vision/releases/download/v1.0.0-dynamically-quantized/tmv-un_quantized_dynamic.onnx',
+  // jsDelivr CDN URL pointing to your model in the GitHub repo
+  // Format: https://cdn.jsdelivr.net/gh/username/repo@branch/path/to/file.onnx
+  modelUrl: 'https://cdn.jsdelivr.net/gh/Srestho0101/monster-vision@main/models/tmv-un_quantized_dynamic.onnx',
 
   // Class names (in the same order as your model was trained)
   classNames: ['Spiderman figure'],
