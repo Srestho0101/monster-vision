@@ -8,10 +8,10 @@
 const CONFIG = {
   // GitHub release URL to your .onnx model
   // Example: 'https://github.com/yourname/yolo-drone/releases/download/v1.0/model.onnx'
-  modelUrl: '',
+  modelUrl: 'https://github.com/Srestho0101/monster-vision/releases/download/v1.0.0-dynamically-quantized/tmv-un_quantized_dynamic.onnx',
 
   // Class names (in the same order as your model was trained)
-  classNames: ['target'],
+  classNames: ['Spiderman figure'],
 
   // Input size the model expects (typically 640 for YOLOv8n)
   inputSize: 640,
