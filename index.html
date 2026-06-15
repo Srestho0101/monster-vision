@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>YOLOv8 Live — Drone Vision</title>
+<script src="config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.18.0/ort.min.js"></script>
+<style>
+  :root {
+    --bg:       #0a0c10;
+    --surface:  #12161e;
+    --border:   #1e2533;
+    --accent:   #00e5ff;
+    --accent2:  #7b61ff;
+    --warn:     #ff6b35;
+    --ok:       #00e676;
+    --text:     #e8eaf0;
+    --muted:    #5a6478;
+    --font-mono: 'JetBrains Mono', 'Fira Mono', 'Courier New', monospace;
+    --font-ui:   'Inter', system-ui, sans-serif;
+    --r: 6px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .drone-icon {
+    width: 28px; height: 28px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  header span {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: auto;
+    font-family: var(--font-mono);
+  }
+
+  /* ── MAIN LAYOUT ── */
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* ── VIDEO AREA ── */
+  #viewport {
+    position: relative;
+    width: 100%;
+    background: #000;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  /* ── OVERLAY HUD ── */
+  #hud {
+    position: absolute;
+    top: 10px; left: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .hud-chip {
+    background: rgba(10,12,16,0.82);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hud-chip .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .hud-chip .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
+  .hud-chip .dot.warn { background: var(--warn); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  #fps-val { color: var(--accent); font-weight: 700; }
+  #det-val { color: var(--ok); font-weight: 700; }
+
+  /* ── CORNER STATUS ── */
+  #corner-status {
+    position: absolute;
+    top: 10px; right: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    pointer-events: none;
+    z-index: 10;
+    background: rgba(10,12,16,0.7);
+    border-radius: 4px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+  }
+
+  /* ── CROSSHAIR ── */
+  #crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0.25;
+  }
+
+  /* ── LOAD SCREEN ── */
+  #load-screen {
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    z-index: 100;
+  }
+
+  #load-screen.hidden { display: none; }
+
+  .load-logo {
+    color: var(--accent);
+    font-size: 48px;
+  }
+
+  #load-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+
+  #load-status {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    max-width: 280px;
+    line-height: 1.6;
+  }
+
+  #progress-wrap {
+    width: 260px;
+    background: var(--border);
+    border-radius: 99px;
+    height: 4px;
+    overflow: hidden;
+  }
+
+  #progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 99px;
+    transition: width 0.3s ease;
+  }
+
+  #load-bytes {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .load-error {
+    color: var(--warn);
+    font-size: 13px;
+    text-align: center;
+    max-width: 280px;
+    line-height: 1.6;
+  }
+
+  /* ── BOTTOM CONTROLS ── */
+  #controls {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 120px;
+  }
+
+  label.ctrl-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  input[type=range] {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 4px;
+    cursor: pointer;
+  }
+
+  .val-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    min-width: 32px;
+    text-align: right;
+  }
+
+  /* toggle buttons */
+  .toggle-btn {
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    color: var(--muted);
+    font-size: 11px;
+    font-family: var(--font-ui);
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+
+  .toggle-btn.active {
+    background: rgba(0,229,255,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* camera flip btn */
+  #flip-btn {
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    color: var(--text);
+    font-size: 18px;
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  #flip-btn:active { background: var(--accent2); }
+
+  /* ── CONFIG PANEL ── */
+  #config-panel {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 0 16px;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+    flex-shrink: 0;
+  }
+  #config-panel.open {
+    max-height: 320px;
+    padding: 14px 16px;
+  }
+
+  .config-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .config-row:last-child { margin-bottom: 0; }
+
+  .config-row label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .config-row input[type=text],
+  .config-row input[type=url] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 8px 10px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .config-row input:focus { border-color: var(--accent); }
+
+  .config-note {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .apply-btn {
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    border: none;
+    border-radius: var(--r);
+    color: #000;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 9px 18px;
+    cursor: pointer;
+    width: 100%;
+    letter-spacing: 0.04em;
+    transition: opacity 0.15s;
+  }
+  .apply-btn:active { opacity: 0.8; }
+
+  /* ── DETECT FLASH ── */
+  #detect-flash {
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--accent);
+    border-radius: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.08s;
+    z-index: 9;
+  }
+  #detect-flash.flash { opacity: 0.7; }
+
+  /* ── GRID OVERLAY ── */
+  #grid-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #grid-svg.visible { opacity: 0.12; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <svg class="drone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/>
+    <circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+    <path d="M5 7v10M19 7v10M7 5h10M7 19h10"/>
+    <rect x="9" y="9" width="6" height="6" rx="1"/>
+  </svg>
+  <h1>Drone Vision</h1>
+  <span id="model-tag">YOLOv8n</span>
+</header>
+
+<!-- MAIN -->
+<main>
+  <div id="viewport">
+    <!-- GRID -->
+    <svg id="grid-svg" viewBox="0 0 100 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <line x1="33" y1="0" x2="33" y2="100" stroke="white" stroke-width="0.3"/>
+      <line x1="66" y1="0" x2="66" y2="100" stroke="white" stroke-width="0.3"/>
+      <line x1="0" y1="33" x2="100" y2="33" stroke="white" stroke-width="0.3"/>
+      <line x1="0" y1="66" x2="100" y2="66" stroke="white" stroke-width="0.3"/>
+    </svg>
+
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <!-- DETECT FLASH BORDER -->
+    <div id="detect-flash"></div>
+
+    <!-- CROSSHAIR -->
+    <svg id="crosshair" width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="white" stroke-width="1">
+      <line x1="20" y1="2" x2="20" y2="10"/><line x1="20" y1="30" x2="20" y2="38"/>
+      <line x1="2" y1="20" x2="10" y2="20"/><line x1="30" y1="20" x2="38" y2="20"/>
+      <circle cx="20" cy="20" r="4"/>
+    </svg>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-chip">
+        <span class="dot" id="live-dot"></span>
+        <span id="fps-val">—</span><span style="color:var(--muted);font-size:10px">fps</span>
+      </div>
+      <div class="hud-chip">
+        <span style="color:var(--muted);font-size:10px">DET</span>
+        <span id="det-val">0</span>
+      </div>
+      <div class="hud-chip" id="inf-chip" style="display:none">
+        <span style="color:var(--muted);font-size:10px">INF</span>
+        <span id="inf-val" style="color:var(--accent2)">—</span><span style="color:var(--muted);font-size:10px">ms</span>
+      </div>
+    </div>
+
+    <!-- CORNER STATUS -->
+    <div id="corner-status">INITIALISING</div>
+
+    <!-- LOAD SCREEN -->
+    <div id="load-screen">
+      <div class="load-logo">🛸</div>
+      <div id="load-title">Loading Model</div>
+      <div id="load-status">Checking cache…</div>
+      <div id="progress-wrap"><div id="progress-bar"></div></div>
+      <div id="load-bytes"></div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div id="controls">
+    <div class="ctrl-group">
+      <label class="ctrl-label">Conf</label>
+      <input type="range" id="conf-slider" min="0.1" max="0.95" step="0.05" value="0.4">
+      <span class="val-badge" id="conf-val">0.40</span>
+    </div>
+    <div class="ctrl-group">
+      <label class="ctrl-label">IoU</label>
+      <input type="range" id="iou-slider" min="0.1" max="0.9" step="0.05" value="0.45">
+      <span class="val-badge" id="iou-val">0.45</span>
+    </div>
+    <button class="toggle-btn" id="grid-btn">Grid</button>
+    <button class="toggle-btn" id="inf-btn">Latency</button>
+    <button class="toggle-btn active" id="label-btn">Labels</button>
+    <button class="toggle-btn" id="cfg-btn">⚙ Config</button>
+    <button id="flip-btn" title="Flip camera">⟳</button>
+  </div>
+
+  <!-- CONFIG PANEL -->
+  <div id="config-panel">
+    <div class="config-row">
+      <label>Model URL (GitHub Release .onnx)</label>
+      <input type="url" id="model-url-input" placeholder="https://github.com/user/repo/releases/download/v1/model.onnx" />
+    </div>
+    <div class="config-row">
+      <label>Class names (comma-separated)</label>
+      <input type="text" id="class-names-input" placeholder="person, car, drone-target" value="target" />
+    </div>
+    <div class="config-row">
+      <label>Input size (model was trained at)</label>
+      <input type="text" id="input-size-input" placeholder="640" value="640" />
+    </div>
+    <div class="config-row">
+      <p class="config-note">💡 For permanent changes, edit <b>config.js</b> directly. Below is for quick testing only. Model is cached in IndexedDB after first download.</p>
+    </div>
+    <button class="apply-btn" id="apply-btn">Apply & Reload Model</button>
+  </div>
+</main>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE (populated from config.js)
+// ─────────────────────────────────────────────────────────────────────────────
+let session       = null;
+let animId        = null;
+let facingMode    = CONFIG.facingMode;
+let showLabels    = CONFIG.showLabels;
+let showGrid      = CONFIG.showGrid;
+let showLatency   = CONFIG.showLatency;
+let confThresh    = CONFIG.confidence;
+let iouThresh     = CONFIG.iou;
+let classNames    = [...CONFIG.classNames];
+let modelInputSize = CONFIG.inputSize;
+let isRunning     = false;
+
+let fpsSmooth = 0, lastFrameTs = 0, frameCount = 0, fpsTs = 0;
+
+const DB_NAME  = 'drone-vision';
+const DB_VER   = 1;
+const STORE    = 'models';
+const CFG_STORE = 'config';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOM REFS
+// ─────────────────────────────────────────────────────────────────────────────
+const video       = document.getElementById('video');
+const canvas      = document.getElementById('canvas');
+const ctx         = canvas.getContext('2d');
+const loadScreen  = document.getElementById('load-screen');
+const loadStatus  = document.getElementById('load-status');
+const loadBytes   = document.getElementById('load-bytes');
+const progressBar = document.getElementById('progress-bar');
+const cornerSt    = document.getElementById('corner-status');
+const liveDot     = document.getElementById('live-dot');
+const fpsVal      = document.getElementById('fps-val');
+const detVal      = document.getElementById('det-val');
+const infVal      = document.getElementById('inf-val');
+const infChip     = document.getElementById('inf-chip');
+const detectFlash = document.getElementById('detect-flash');
+const gridSvg     = document.getElementById('grid-svg');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INDEXEDDB HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function openDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE))    db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(CFG_STORE)) db.createObjectStore(CFG_STORE);
+    };
+    req.onsuccess = e => res(e.target.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+async function dbGet(db, store, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+async function dbPut(db, store, key, val) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).put(val, key);
+    req.onsuccess = () => res();
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG PERSISTENCE
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadConfig(db) {
+  const url   = await dbGet(db, CFG_STORE, 'modelUrl');
+  const names = await dbGet(db, CFG_STORE, 'classNames');
+  const size  = await dbGet(db, CFG_STORE, 'inputSize');
+  return {
+    modelUrl:  url   || CONFIG.modelUrl,
+    classNames: names ? JSON.parse(names) : [...CONFIG.classNames],
+    inputSize:  size  ? parseInt(size) : CONFIG.inputSize,
+  };
+}
+
+async function saveConfig(db, cfg) {
+  await dbPut(db, CFG_STORE, 'modelUrl',   cfg.modelUrl);
+  await dbPut(db, CFG_STORE, 'classNames', JSON.stringify(cfg.classNames));
+  await dbPut(db, CFG_STORE, 'inputSize',  String(cfg.inputSize));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL LOADING
+// ─────────────────────────────────────────────────────────────────────────────
+function setProgress(pct, msg, bytes) {
+  progressBar.style.width = pct + '%';
+  loadStatus.textContent  = msg;
+  if (bytes != null) loadBytes.textContent = bytes;
+}
+
+async function fetchWithProgress(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+  const total = parseInt(resp.headers.get('content-length') || '0');
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total > 0) {
+      const pct = Math.round((received / total) * 80);
+      const mb  = (received / 1048576).toFixed(1);
+      const tot = (total   / 1048576).toFixed(1);
+      setProgress(10 + pct, `Downloading model…`, `${mb} / ${tot} MB`);
+    } else {
+      const mb = (received / 1048576).toFixed(1);
+      setProgress(40, `Downloading model…`, `${mb} MB received`);
+    }
+  }
+  const buf = new Uint8Array(received);
+  let pos = 0;
+  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
+  return buf.buffer;
+}
+
+async function loadModel(db, url) {
+  if (!url) throw new Error('No model URL configured. Open ⚙ Config and paste your GitHub release .onnx URL.');
+
+  const cacheKey = 'model::' + url;
+  setProgress(5, 'Checking cache…', '');
+
+  let modelBuffer;
+  const cached = await dbGet(db, STORE, cacheKey);
+  if (cached) {
+    setProgress(90, 'Loading from cache…', 'cached ✓');
+    modelBuffer = cached;
+  } else {
+    setProgress(10, 'Fetching from GitHub…', '');
+    modelBuffer = await fetchWithProgress(url);
+    setProgress(90, 'Caching model…', '');
+    await dbPut(db, STORE, cacheKey, modelBuffer);
+  }
+
+  setProgress(95, 'Creating ONNX session…', '');
+  ort.env.wasm.numThreads = navigator.hardwareConcurrency > 1 ? 2 : 1;
+  const sess = await ort.InferenceSession.create(modelBuffer, {
+    executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
+  });
+  setProgress(100, 'Ready!', '');
+  return sess;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAMERA
+// ─────────────────────────────────────────────────────────────────────────────
+async function startCamera(facing) {
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+  const constraints = {
+    video: {
+      facingMode: { ideal: facing },
+      width:  { ideal: 1280 },
+      height: { ideal: 720 },
+    }
+  };
+  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  video.srcObject = stream;
+  await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+  await video.play();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// YOLO PRE/POST PROCESSING
+// ─────────────────────────────────────────────────────────────────────────────
+const offscreenCanvas = document.createElement('canvas');
+const offscreenCtx    = offscreenCanvas.getContext('2d');
+
+function preprocess(inputSize) {
+  offscreenCanvas.width  = inputSize;
+  offscreenCanvas.height = inputSize;
+  offscreenCtx.drawImage(video, 0, 0, inputSize, inputSize);
+  const imageData = offscreenCtx.getImageData(0, 0, inputSize, inputSize).data;
+
+  const tensor = new Float32Array(3 * inputSize * inputSize);
+  const size   = inputSize * inputSize;
+  for (let i = 0; i < size; i++) {
+    tensor[i]          = imageData[i * 4]     / 255;  // R
+    tensor[i + size]   = imageData[i * 4 + 1] / 255;  // G
+    tensor[i + size*2] = imageData[i * 4 + 2] / 255;  // B
+  }
+  return new ort.Tensor('float32', tensor, [1, 3, inputSize, inputSize]);
+}
+
+function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+
+// NMS
+function nmsBoxes(boxes, scores, iouThr) {
+  const idxs = scores.map((_, i) => i).sort((a, b) => scores[b] - scores[a]);
+  const keep = [];
+  const used = new Set();
+  for (const i of idxs) {
+    if (used.has(i)) continue;
+    keep.push(i);
+    for (const j of idxs) {
+      if (used.has(j) || j === i) continue;
+      const iou = calcIoU(boxes[i], boxes[j]);
+      if (iou > iouThr) used.add(j);
+    }
+  }
+  return keep;
+}
+
+function calcIoU(a, b) {
+  const ix1 = Math.max(a[0], b[0]), iy1 = Math.max(a[1], b[1]);
+  const ix2 = Math.min(a[2], b[2]), iy2 = Math.min(a[3], b[3]);
+  const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+  const ua = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter;
+  return ua > 0 ? inter / ua : 0;
+}
+
+function postprocess(output, vidW, vidH, confThr, iouThr) {
+  // YOLOv8 output: [1, 4+num_classes, num_anchors] OR [1, num_anchors, 4+num_classes]
+  const data  = output.data;
+  const shape = output.dims;
+  const [, dim1, dim2] = shape;
+
+  // Auto-detect layout
+  let numAnchors, numClasses, rowMajor;
+  if (dim1 < dim2) {
+    // [1, 4+nc, anchors]  → column-major (standard YOLOv8 export)
+    numAnchors = dim2;
+    numClasses = dim1 - 4;
+    rowMajor   = false;
+  } else {
+    // [1, anchors, 4+nc]
+    numAnchors = dim1;
+    numClasses = dim2 - 4;
+    rowMajor   = true;
+  }
+
+  const scaleX = vidW / modelInputSize;
+  const scaleY = vidH / modelInputSize;
+
+  const rawBoxes  = [];
+  const rawScores = [];
+  const rawCls    = [];
+
+  for (let i = 0; i < numAnchors; i++) {
+    let cx, cy, w, h;
+    let maxScore = -Infinity, maxCls = 0;
+
+    if (!rowMajor) {
+      cx = data[0 * numAnchors + i];
+      cy = data[1 * numAnchors + i];
+      w  = data[2 * numAnchors + i];
+      h  = data[3 * numAnchors + i];
+      for (let c = 0; c < numClasses; c++) {
+        const s = data[(4 + c) * numAnchors + i];
+        if (s > maxScore) { maxScore = s; maxCls = c; }
+      }
+    } else {
+      cx = data[i * (4 + numClasses) + 0];
+      cy = data[i * (4 + numClasses) + 1];
+      w  = data[i * (4 + numClasses) + 2];
+      h  = data[i * (4 + numClasses) + 3];
+      for (let c = 0; c < numClasses; c++) {
+        const s = data[i * (4 + numClasses) + 4 + c];
+        if (s > maxScore) { maxScore = s; maxCls = c; }
+      }
+    }
+
+    if (maxScore < confThr) continue;
+
+    const x1 = (cx - w / 2) * scaleX;
+    const y1 = (cy - h / 2) * scaleY;
+    const x2 = (cx + w / 2) * scaleX;
+    const y2 = (cy + h / 2) * scaleY;
+
+    rawBoxes.push([x1, y1, x2, y2]);
+    rawScores.push(maxScore);
+    rawCls.push(maxCls);
+  }
+
+  const keep = nmsBoxes(rawBoxes, rawScores, iouThr);
+  return keep.map(i => ({
+    x1: rawBoxes[i][0], y1: rawBoxes[i][1],
+    x2: rawBoxes[i][2], y2: rawBoxes[i][3],
+    score: rawScores[i],
+    cls: rawCls[i],
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAWING
+// ─────────────────────────────────────────────────────────────────────────────
+const COLORS = [
+  '#00e5ff', '#7b61ff', '#00e676', '#ff6b35',
+  '#ffea00', '#ea00ff', '#ff4081', '#00bfae',
+];
+
+function drawDetections(dets) {
+  canvas.width  = video.videoWidth  || video.clientWidth;
+  canvas.height = video.videoHeight || video.clientHeight;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (const d of dets) {
+    const color = COLORS[d.cls % COLORS.length];
+    const x = d.x1, y = d.y1, w = d.x2 - d.x1, h = d.y2 - d.y1;
+
+    // Shadow glow
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 12;
+
+    // Box
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2;
+    ctx.strokeRect(x, y, w, h);
+    ctx.shadowBlur  = 0;
+
+    // Corner ticks
+    const t = Math.min(w, h) * 0.18;
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 3;
+    [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([bx, by]) => {
+      const sx = bx === x ? 1 : -1, sy = by === y ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(bx + sx*t, by);
+      ctx.lineTo(bx, by);
+      ctx.lineTo(bx, by + sy*t);
+      ctx.stroke();
+    });
+
+    if (showLabels) {
+      const name  = classNames[d.cls] || `cls${d.cls}`;
+      const label = `${name} ${(d.score * 100).toFixed(0)}%`;
+      const fs    = Math.max(11, Math.min(14, w * 0.06));
+      ctx.font    = `700 ${fs}px 'JetBrains Mono', monospace`;
+      const tw    = ctx.measureText(label).width;
+      const pad   = 4;
+      const lx    = x, ly = y > fs + pad*2 + 4 ? y - fs - pad*2 - 2 : y + 2;
+      ctx.fillStyle = color;
+      ctx.fillRect(lx, ly, tw + pad*2, fs + pad*2);
+      ctx.fillStyle = '#000';
+      ctx.fillText(label, lx + pad, ly + fs + pad - 2);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INFERENCE LOOP
+// ─────────────────────────────────────────────────────────────────────────────
+let lastFlash = 0;
+
+async function inferenceLoop(timestamp) {
+  if (!isRunning || !session || video.readyState < 2) {
+    animId = requestAnimationFrame(inferenceLoop);
+    return;
+  }
+
+  // FPS
+  frameCount++;
+  if (timestamp - fpsTs >= 500) {
+    const elapsed = (timestamp - fpsTs) / 1000;
+    fpsSmooth = frameCount / elapsed;
+    fpsVal.textContent = fpsSmooth.toFixed(1);
+    frameCount = 0;
+    fpsTs = timestamp;
+  }
+
+  try {
+    const t0    = performance.now();
+    const input = preprocess(modelInputSize);
+    const feeds = {};
+    feeds[session.inputNames[0]] = input;
+    const results = await session.run(feeds);
+    const output  = results[session.outputNames[0]];
+    const infMs   = (performance.now() - t0).toFixed(0);
+
+    const vidW = video.videoWidth  || video.clientWidth;
+    const vidH = video.videoHeight || video.clientHeight;
+
+    const dets = postprocess(output, vidW, vidH, confThresh, iouThresh);
+    drawDetections(dets);
+    detVal.textContent = dets.length;
+
+    if (showLatency) {
+      infChip.style.display = 'flex';
+      infVal.textContent    = infMs;
+    }
+
+    // Flash on detection
+    if (dets.length > 0 && timestamp - lastFlash > 300) {
+      detectFlash.classList.add('flash');
+      setTimeout(() => detectFlash.classList.remove('flash'), 80);
+      lastFlash = timestamp;
+    }
+  } catch (e) {
+    console.warn('Inference error:', e);
+  }
+
+  animId = requestAnimationFrame(inferenceLoop);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────────────────────
+async function init(db, cfg) {
+  // Populate config UI
+  document.getElementById('model-url-input').value    = cfg.modelUrl;
+  document.getElementById('class-names-input').value  = cfg.classNames.join(', ');
+  document.getElementById('input-size-input').value   = String(cfg.inputSize);
+
+  classNames     = cfg.classNames;
+  modelInputSize = cfg.inputSize;
+
+  cornerSt.textContent = 'LOADING MODEL';
+
+  try {
+    session = await loadModel(db, cfg.modelUrl);
+  } catch (e) {
+    loadStatus.textContent = '';
+    const errDiv = document.createElement('div');
+    errDiv.className = 'load-error';
+    errDiv.innerHTML = `⚠ ${e.message}<br><br>Edit <b>config.js</b> and set your GitHub release .onnx URL in <code>modelUrl</code>, then reload this page.`;
+    document.getElementById('load-screen').appendChild(errDiv);
+    progressBar.style.background = '#ff6b35';
+    cornerSt.textContent = 'NO MODEL';
+    return;
+  }
+
+  cornerSt.textContent = 'CAM INIT';
+  loadStatus.textContent = 'Starting camera…';
+
+  try {
+    await startCamera(facingMode);
+  } catch (e) {
+    loadStatus.textContent = '⚠ Camera permission denied. Please allow camera access and reload.';
+    cornerSt.textContent = 'NO CAM';
+    return;
+  }
+
+  // Hide load screen
+  loadScreen.classList.add('hidden');
+  cornerSt.textContent = 'LIVE';
+  liveDot.classList.add('live');
+  document.getElementById('model-tag').textContent =
+    (cfg.modelUrl.split('/').pop() || 'YOLOv8n').replace('.onnx', '');
+
+  isRunning = true;
+  fpsTs = performance.now();
+  requestAnimationFrame(inferenceLoop);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI WIRING
+// ─────────────────────────────────────────────────────────────────────────────
+const confSlider = document.getElementById('conf-slider');
+const confValEl  = document.getElementById('conf-val');
+confSlider.addEventListener('input', () => {
+  confThresh = parseFloat(confSlider.value);
+  confValEl.textContent = confThresh.toFixed(2);
+});
+
+const iouSlider = document.getElementById('iou-slider');
+const iouValEl  = document.getElementById('iou-val');
+iouSlider.addEventListener('input', () => {
+  iouThresh = parseFloat(iouSlider.value);
+  iouValEl.textContent = iouThresh.toFixed(2);
+});
+
+document.getElementById('grid-btn').addEventListener('click', function() {
+  showGrid = !showGrid;
+  this.classList.toggle('active', showGrid);
+  gridSvg.classList.toggle('visible', showGrid);
+});
+
+document.getElementById('inf-btn').addEventListener('click', function() {
+  showLatency = !showLatency;
+  this.classList.toggle('active', showLatency);
+  if (!showLatency) { infChip.style.display = 'none'; }
+});
+
+document.getElementById('label-btn').addEventListener('click', function() {
+  showLabels = !showLabels;
+  this.classList.toggle('active', showLabels);
+});
+
+document.getElementById('cfg-btn').addEventListener('click', function() {
+  const panel = document.getElementById('config-panel');
+  panel.classList.toggle('open');
+  this.classList.toggle('active', panel.classList.contains('open'));
+});
+
+document.getElementById('flip-btn').addEventListener('click', async () => {
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  try { await startCamera(facingMode); } catch (e) { console.warn(e); }
+});
+
+document.getElementById('apply-btn').addEventListener('click', async () => {
+  const url   = document.getElementById('model-url-input').value.trim();
+  const names = document.getElementById('class-names-input').value
+                  .split(',').map(s => s.trim()).filter(Boolean);
+  const size  = parseInt(document.getElementById('input-size-input').value) || 640;
+
+  const db  = await openDB();
+  const cfg = { modelUrl: url, classNames: names, inputSize: size };
+  await saveConfig(db, cfg);
+
+  // Reset and reinit
+  isRunning = false;
+  if (animId) cancelAnimationFrame(animId);
+  session = null;
+  canvas.width = 0;
+  loadScreen.classList.remove('hidden');
+  progressBar.style.width    = '0%';
+  progressBar.style.background = 'linear-gradient(90deg, var(--accent2), var(--accent))';
+  loadBytes.textContent      = '';
+  liveDot.classList.remove('live');
+  fpsVal.textContent = '—';
+  detVal.textContent = '0';
+  document.getElementById('config-panel').classList.remove('open');
+  document.getElementById('cfg-btn').classList.remove('active');
+
+  await init(db, cfg);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────────────────────
+(async () => {
+  const db  = await openDB();
+  const cfg = await loadConfig(db);
+  await init(db, cfg);
+})();
+</script>
+</body>
+</html>
